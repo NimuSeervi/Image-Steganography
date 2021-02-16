@@ -1,0 +1,1051 @@
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+using System.IO;
+namespace Text2Image
+{
+ public partial class FrmSteganography : Form
+ {
+ public FrmSteganography()
+ {
+ InitializeComponent();
+ }
+ //public values:
+ string loadedTrueImagePath, loadedFilePath, saveToImage,DLoadImagePath,DSaveFilePath;
+ int height, width;
+ long fileSize, fileNameSize;
+ Image loadedTrueImage, DecryptedImage ,AfterEncryption;
+ Bitmap loadedTrueBitmap, DecryptedBitmap;
+ Rectangle previewImage = new Rectangle(20,160,490,470);
+ bool canPaint = false, EncriptionDone = false;
+ byte[] fileContainer;
+ private void EnImageBrowse_btn_Click(object sender, EventArgs e)
+ {
+if (openFileDialog1.ShowDialog() == DialogResult.OK)
+ {
+ loadedTrueImagePath = openFileDialog1.FileName;
+ EnImage_tbx.Text = loadedTrueImagePath;
+ loadedTrueImage = Image.FromFile(loadedTrueImagePath);
+ height = loadedTrueImage.Height;
+ width = loadedTrueImage.Width;
+ loadedTrueBitmap = new Bitmap(loadedTrueImage);
+ FileInfo imginf = new FileInfo(loadedTrueImagePath);
+ float fs = (float)imginf.Length / 1024;
+ ImageSize_lbl.Text = smalldecimal(fs.ToString(), 2) + " KB";
+ ImageHeight_lbl.Text = loadedTrueImage.Height.ToString() + " Pixel";
+ ImageWidth_lbl.Text = loadedTrueImage.Width.ToString() + " Pixel";
+ double cansave = (8.0 * ((height * (width / 3) * 3) / 3 - 1)) / 1024;
+ CanSave_lbl.Text = smalldecimal(cansave.ToString(), 2) + " KB";
+ canPaint = true;
+ this.Invalidate();
+ }
+ }
+ private string smalldecimal(string inp, int dec)
+ {
+ int i;
+ for (i = inp.Length - 1; i > 0; i--)
+ if (inp[i] == '.')
+ break;
+ try
+ {
+ return inp.Substring(0, i + dec + 1);
+ }
+ catch
+ {
+ return inp;
+ }
+ }
+ private void EnFileBrowse_btn_Click(object sender, EventArgs e)
+ {
+ if (openFileDialog2.ShowDialog() == DialogResult.OK)
+ {
+ loadedFilePath = openFileDialog2.FileName;
+ EnFile_tbx.Text = loadedFilePath;
+ FileInfo finfo = new FileInfo(loadedFilePath);
+ fileSize = finfo.Length;
+ fileNameSize = justFName(loadedFilePath).Length;
+ }
+ }
+ private void Encrypt_btn_Click(object sender, EventArgs e)
+ {
+ if (saveFileDialog1.ShowDialog() == DialogResult.OK)
+ {
+ saveToImage = saveFileDialog1.FileName;
+ }
+ else
+ return;
+ if (EnImage_tbx.Text == String.Empty || EnFile_tbx.Text == String.Empty)
+ {
+ MessageBox.Show("Encrypton information is incomplete!\nPlease complete them frist.",
+"Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+ }
+ if (8*((height * (width/3)*3)/3 - 1) < fileSize + fileNameSize)
+ {
+ MessageBox.Show("File size is too large!\nPlease use a larger image to hide this file.", "Error",
+MessageBoxButtons.OK, MessageBoxIcon.Error);
+ return;
+ }
+ fileContainer = File.ReadAllBytes(loadedFilePath);
+ EncryptLayer();
+ }
+ private void EncryptLayer()
+ {
+ toolStripStatusLabel1.Text ="Encrypting... Please wait";
+ Application.DoEvents();
+ long FSize = fileSize;
+ Bitmap changedBitmap = EncryptLayer(8, loadedTrueBitmap, 0, (height * (width/3)*3) / 3 -
+fileNameSize - 1, true);
+ FSize -= (height * (width / 3) * 3) / 3 - fileNameSize - 1;
+ if(FSize > 0)
+ {
+ for (int i = 7; i >= 0 && FSize > 0; i--)
+ {
+ changedBitmap = EncryptLayer(i, changedBitmap, (((8 - i) * height * (width / 3) * 3) / 3 -
+fileNameSize - (8 - i)), (((9 - i) * height * (width / 3) * 3) / 3 - fileNameSize - (9 - i)), false);
+ FSize -= (height * (width / 3) * 3) / 3 - 1;
+ }
+ }
+ changedBitmap.Save(saveToImage);
+ toolStripStatusLabel1.Text = "Encrypted image has been successfully saved.";
+ EncriptionDone = true;
+ AfterEncryption = Image.FromFile(saveToImage);
+ this.Invalidate();
+ }
+ private Bitmap EncryptLayer(int layer, Bitmap inputBitmap, long startPosition, long endPosition,
+bool writeFileName)
+ {
+ Bitmap outputBitmap = inputBitmap;
+ layer--;
+ int i = 0, j = 0;
+ long FNSize = 0;
+ bool[] t = new bool[8];
+ bool[] rb = new bool[8];
+ bool[] gb = new bool[8];
+ bool[] bb = new bool[8];
+ Color pixel = new Color();
+ byte r, g, b;
+ if (writeFileName)
+ {
+ FNSize = fileNameSize;
+ string fileName = justFName(loadedFilePath);
+ //write fileName:
+ for (i = 0; i < height && i * (height / 3) < fileNameSize; i++)
+ for (j = 0; j < (width / 3) * 3 && i * (height / 3) + (j / 3) < fileNameSize; j++)
+ {
+ byte2bool((byte)fileName[i * (height / 3) + j / 3], ref t);
+ pixel = inputBitmap.GetPixel(j, i);
+ r = pixel.R;
+ g = pixel.G;
+ b = pixel.B;
+ byte2bool(r, ref rb);
+ byte2bool(g, ref gb);
+ byte2bool(b, ref bb);
+ if (j % 3 == 0)
+ {
+ rb[7] = t[0];
+ gb[7] = t[1];
+ bb[7] = t[2];
+ }
+ else if (j % 3 == 1)
+ {
+ rb[7] = t[3];
+ gb[7] = t[4];
+ bb[7] = t[5];
+ }
+ else
+ {
+ rb[7] = t[6];
+ gb[7] = t[7];
+ }
+ Color result = Color.FromArgb((int)bool2byte(rb), (int)bool2byte(gb), (int)bool2byte(bb));
+ outputBitmap.SetPixel(j, i, result);
+ }
+ i--;
+ }
+ //write file (after file name):
+ int tempj = j;
+ for (; i < height && i * (height / 3) < endPosition - startPosition + FNSize && startPosition + i *
+(height / 3) < fileSize + FNSize; i++)
+ for (j = 0; j < (width / 3) * 3 && i * (height / 3) + (j / 3) < endPosition - startPosition + FNSize &&
+startPosition + i * (height / 3) + (j / 3) < fileSize + FNSize; j++)
+ {
+ if (tempj != 0)
+ {
+ j = tempj;
+ tempj = 0;
+ }
+ byte2bool((byte)fileContainer[startPosition + i * (height / 3) + j / 3 - FNSize], ref t);
+ pixel = inputBitmap.GetPixel(j, i);
+ r = pixel.R;
+ g = pixel.G;
+ b = pixel.B;
+ byte2bool(r, ref rb);
+ byte2bool(g, ref gb);
+ byte2bool(b, ref bb);
+ if (j % 3 == 0)
+ {
+ rb[layer] = t[0];
+ gb[layer] = t[1];
+ bb[layer] = t[2];
+ }
+ else if (j % 3 == 1)
+ {
+ rb[layer] = t[3];
+ gb[layer] = t[4];
+ bb[layer] = t[5];
+ }
+ else
+ {
+ rb[layer] = t[6];
+ gb[layer] = t[7];
+ }
+ Color result = Color.FromArgb((int)bool2byte(rb), (int)bool2byte(gb), (int)bool2byte(bb));
+ outputBitmap.SetPixel(j, i, result);
+ }
+ long tempFS = fileSize, tempFNS = fileNameSize;
+ r = (byte)(tempFS % 100);
+ tempFS /= 100;
+ g = (byte)(tempFS % 100);
+ tempFS /= 100;
+ b = (byte)(tempFS % 100);
+ Color flenColor = Color.FromArgb(r,g,b);
+ outputBitmap.SetPixel(width - 1, height - 1, flenColor);
+ r = (byte)(tempFNS % 100);
+ tempFNS /= 100;
+ g = (byte)(tempFNS % 100);
+ tempFNS /= 100;
+ b = (byte)(tempFNS % 100);
+ Color fnlenColor = Color.FromArgb(r,g,b);
+ outputBitmap.SetPixel(width - 2, height - 1, fnlenColor);
+ return outputBitmap;
+ }
+ private void DecryptLayer()
+ {
+ toolStripStatusLabel1.Text = "Decrypting... Please wait";
+ Application.DoEvents();
+ int i, j = 0;
+ bool[] t = new bool[8];
+ bool[] rb = new bool[8];
+ bool[] gb = new bool[8];
+ bool[] bb = new bool[8];
+ Color pixel = new Color();
+ byte r, g, b;
+ pixel = DecryptedBitmap.GetPixel(width - 1, height - 1);
+ long fSize = pixel.R + pixel.G * 100 + pixel.B * 10000;
+ pixel = DecryptedBitmap.GetPixel(width - 2, height - 1);
+ long fNameSize = pixel.R + pixel.G * 100 + pixel.B * 10000;
+ byte[] res = new byte[fSize];
+ string resFName = "";
+ byte temp;
+ //Read file name:
+ for (i = 0; i < height && i * (height / 3) < fNameSize; i++)
+ for (j = 0; j < (width / 3) * 3 && i * (height / 3) + (j / 3) < fNameSize; j++)
+ {
+ pixel = DecryptedBitmap.GetPixel(j, i);
+ r = pixel.R;
+ g = pixel.G;
+ b = pixel.B;
+ byte2bool(r, ref rb);
+ byte2bool(g, ref gb);
+ byte2bool(b, ref bb);
+ if (j % 3 == 0)
+ {
+ t[0] = rb[7];
+ t[1] = gb[7];
+ t[2] = bb[7];
+ }
+ else if (j % 3 == 1)
+ {
+ t[3] = rb[7];
+ t[4] = gb[7];
+ t[5] = bb[7];
+ }
+ else
+ {
+ t[6] = rb[7];
+ t[7] = gb[7];
+ temp = bool2byte(t);
+ resFName += (char)temp;
+ }
+ }
+ //Read file on layer 8 (after file name):
+ int tempj = j;
+ i--;
+ for (; i < height && i * (height / 3) < fSize + fNameSize; i++)
+ for (j = 0; j < (width / 3) * 3 && i * (height / 3) + (j / 3) < (height * (width / 3) * 3) / 3 - 1 && i *
+(height / 3) + (j / 3) < fSize + fNameSize; j++)
+ {
+ if (tempj != 0)
+ {
+ j = tempj;
+ tempj = 0;
+ }
+ pixel = DecryptedBitmap.GetPixel(j, i);
+ r = pixel.R;
+ g = pixel.G;
+ b = pixel.B;
+ byte2bool(r, ref rb);
+ byte2bool(g, ref gb);
+ byte2bool(b, ref bb);
+ if (j % 3 == 0)
+ {
+ t[0] = rb[7];
+ t[1] = gb[7];
+ t[2] = bb[7];
+ }
+ else if (j % 3 == 1)
+ {
+ t[3] = rb[7];
+ t[4] = gb[7];
+ t[5] = bb[7];
+ }
+ else
+ {
+ t[6] = rb[7];
+ t[7] = gb[7];
+ temp = bool2byte(t);
+ res[i * (height / 3) + j / 3 - fNameSize] = temp;
+ }
+ }
+ //Read file on other layers:
+ long readedOnL8 = (height * (width/3)*3) /3 - fNameSize - 1;
+ for (int layer = 6; layer >= 0 && readedOnL8 + (6 - layer) * ((height * (width / 3) * 3) / 3 - 1) < fSize;
+layer--)
+ for (i = 0; i < height && i * (height / 3) + readedOnL8 + (6 - layer) * ((height * (width / 3) * 3) / 3
+- 1) < fSize; i++)
+ for (j = 0; j < (width / 3) * 3 && i * (height / 3) + (j / 3) + readedOnL8 + (6 - layer) * ((height *
+(width / 3) * 3) / 3 - 1) < fSize; j++)
+ {
+ pixel = DecryptedBitmap.GetPixel(j, i);
+ r = pixel.R;
+ g = pixel.G;
+ b = pixel.B;
+ byte2bool(r, ref rb);
+ byte2bool(g, ref gb);
+ byte2bool(b, ref bb);
+ if (j % 3 == 0)
+ {
+ t[0] = rb[layer];
+ t[1] = gb[layer];
+ t[2] = bb[layer];
+ }
+ else if (j % 3 == 1)
+ {
+ t[3] = rb[layer];
+ t[4] = gb[layer];
+ t[5] = bb[layer];
+ }
+ else
+ {
+ t[6] = rb[layer];
+ t[7] = gb[layer];
+ temp = bool2byte(t);
+ res[i * (height / 3) + j / 3 + (6 - layer) * ((height * (width / 3) * 3) / 3 - 1) + readedOnL8] =
+temp;
+ }
+ }
+ if (File.Exists(DSaveFilePath + "\\" + resFName))
+ {
+ MessageBox.Show("File \"" + resFName + "\" already exist please choose another path to save
+file", "Error",MessageBoxButtons.OK,MessageBoxIcon.Error);
+ return;
+ }
+ else
+ File.WriteAllBytes(DSaveFilePath + "\\" + resFName, res);
+ toolStripStatusLabel1.Text = "Decrypted file has been successfully saved.";
+ Application.DoEvents();
+ }
+ private void byte2bool(byte inp, ref bool[] outp)
+ {
+ if(inp>=0 && inp<=255)
+ for (short i = 7; i >= 0; i--)
+ {
+ if (inp % 2 == 1)
+ outp[i] = true;
+ else
+ outp[i] = false;
+ inp /= 2;
+ }
+ else
+ throw new Exception("Input number is illegal.");
+ }
+ private byte bool2byte(bool[] inp)
+ {
+ byte outp = 0;
+ for (short i = 7; i >= 0; i--)
+ {
+ if (inp[i])
+ outp += (byte)Math.Pow(2.0, (double)(7-i));
+ }
+ return outp;
+ }
+ private void Decrypt_btn_Click(object sender, EventArgs e)
+ {
+ if (DeSaveFile_tbx.Text == String.Empty || DeLoadImage_tbx.Text == String.Empty)
+ {
+ MessageBox.Show("Text boxes must not be empty!", "Error", MessageBoxButtons.OK,
+MessageBoxIcon.Error);
+
+ return;
+ }
+ if (System.IO.File.Exists(DeLoadImage_tbx.Text) == false)
+ {
+ MessageBox.Show("Select image file.", "Error", MessageBoxButtons.OK,
+MessageBoxIcon.Exclamation);
+ DeLoadImage_tbx.Focus();
+ return;
+ }
+ DecryptLayer();
+ }
+ private void DeLoadImageBrowse_btn_Click(object sender, EventArgs e)
+ {
+ if (openFileDialog3.ShowDialog() == DialogResult.OK)
+ {
+ DLoadImagePath = openFileDialog3.FileName;
+ DeLoadImage_tbx.Text = DLoadImagePath;
+ DecryptedImage = Image.FromFile(DLoadImagePath);
+ height = DecryptedImage.Height;
+ width = DecryptedImage.Width;
+ DecryptedBitmap = new Bitmap(DecryptedImage);
+ FileInfo imginf = new FileInfo(DLoadImagePath);
+ float fs = (float)imginf.Length / 1024;
+ ImageSize_lbl.Text = smalldecimal(fs.ToString(), 2) + " KB";
+ ImageHeight_lbl.Text = DecryptedImage.Height.ToString() + " Pixel";
+ ImageWidth_lbl.Text = DecryptedImage.Width.ToString() + " Pixel";
+ double cansave = (8.0 * ((height * (width / 3) * 3) / 3 - 1)) / 1024;
+ CanSave_lbl.Text = smalldecimal(cansave.ToString(), 2) + " KB";
+ canPaint = true;
+ this.Invalidate();
+ }
+ }
+ private void DeSaveFileBrowse_btn_Click(object sender, EventArgs e)
+ {
+ if (folderBrowserDialog1.ShowDialog() == DialogResult.OK)
+ {
+ DSaveFilePath = folderBrowserDialog1.SelectedPath;
+ DeSaveFile_tbx.Text = DSaveFilePath;
+ }
+ }
+ private void Form1_Paint(object sender, PaintEventArgs e)
+ {
+ if(canPaint)
+ try
+ {
+ if (!EncriptionDone)
+ e.Graphics.DrawImage(loadedTrueImage, previewImage);
+ else
+ e.Graphics.DrawImage(AfterEncryption, previewImage);
+ }
+ catch
+ {
+ e.Graphics.DrawImage(DecryptedImage, previewImage);
+ }
+ }
+ private string justFName(string path)
+ {
+ string output;
+ int i;
+ if (path.Length == 3) // i.e: "C:\\"
+ return path.Substring(0, 1);
+ for (i = path.Length - 1; i > 0; i--)
+ if (path[i] == '\\')
+ break;
+ output = path.Substring(i + 1);
+ return output;
+ }
+ private string justEx(string fName)
+ {
+ string output;
+ int i;
+ for (i = fName.Length - 1; i > 0; i--)
+ if (fName[i] == '.')
+ break;
+ output = fName.Substring(i + 1);
+ return output;
+ }
+ private void Close_btn_Click(object sender, EventArgs e)
+ {
+ this.Close();
+ }
+
+ }
+}
+namespace Text2Image
+{
+ partial class FrmSteganography
+ {
+ /// <summary>
+ /// Required designer variable.
+ /// </summary>
+ private System.ComponentModel.IContainer components = null;
+ /// <summary>
+ /// Clean up any resources being used.
+ /// </summary>
+ /// <param name="disposing">true if managed resources should be disposed; otherwise,
+false.</param>
+ protected override void Dispose(bool disposing)
+ {
+ if (disposing && (components != null))
+ {
+ components.Dispose();
+ }
+ base.Dispose(disposing);
+ }
+ #region Windows Form Designer generated code
+ /// <summary>
+ /// Required method for Designer support - do not modify
+ /// the contents of this method with the code editor.
+ /// </summary>
+ private void InitializeComponent()
+ {
+ this.groupBox1 = new System.Windows.Forms.GroupBox();
+ this.label5 = new System.Windows.Forms.Label();
+ this.Decrypt_btn = new System.Windows.Forms.Button();
+ this.DeLoadImage_tbx = new System.Windows.Forms.TextBox();
+ this.DeSaveFile_tbx = new System.Windows.Forms.TextBox();
+ this.DeSaveFileBrowse_btn = new System.Windows.Forms.Button();
+ this.label6 = new System.Windows.Forms.Label();
+ this.DeLoadImageBrowse_btn = new System.Windows.Forms.Button();
+ this.groupBox2 = new System.Windows.Forms.GroupBox();
+ this.Encrypt_btn = new System.Windows.Forms.Button();
+ this.EnFileBrowse_btn = new System.Windows.Forms.Button();
+ this.EnImageBrowse_btn = new System.Windows.Forms.Button();
+ this.label2 = new System.Windows.Forms.Label();
+ this.EnFile_tbx = new System.Windows.Forms.TextBox();
+ this.label1 = new System.Windows.Forms.Label();
+ this.EnImage_tbx = new System.Windows.Forms.TextBox();
+ this.openFileDialog1 = new System.Windows.Forms.OpenFileDialog();
+ this.openFileDialog2 = new System.Windows.Forms.OpenFileDialog();
+ this.saveFileDialog1 = new System.Windows.Forms.SaveFileDialog();
+ this.openFileDialog3 = new System.Windows.Forms.OpenFileDialog();
+ this.label3 = new System.Windows.Forms.Label();
+ this.groupBox3 = new System.Windows.Forms.GroupBox();
+ this.ByteCapacity_lbl = new System.Windows.Forms.Label();
+ this.CanSave_lbl = new System.Windows.Forms.Label();
+ this.ImageWidth_lbl = new System.Windows.Forms.Label();
+ this.ImageHeight_lbl = new System.Windows.Forms.Label();
+ this.ImageSize_lbl = new System.Windows.Forms.Label();
+ this.label9 = new System.Windows.Forms.Label();
+ this.label10 = new System.Windows.Forms.Label();
+ this.label8 = new System.Windows.Forms.Label();
+ this.label7 = new System.Windows.Forms.Label();
+ this.folderBrowserDialog1 = new System.Windows.Forms.FolderBrowserDialog();
+ this.Close_btn = new System.Windows.Forms.Button();
+ this.statusStrip1 = new System.Windows.Forms.StatusStrip();
+ this.toolStripStatusLabel1 = new System.Windows.Forms.ToolStripStatusLabel();
+ this.tabControl1 = new System.Windows.Forms.TabControl();
+ this.tabPage1 = new System.Windows.Forms.TabPage();
+ this.tabPage2 = new System.Windows.Forms.TabPage();
+ this.linkLabel1 = new System.Windows.Forms.LinkLabel();
+ this.groupBox1.SuspendLayout();
+ this.groupBox2.SuspendLayout();
+ this.groupBox3.SuspendLayout();
+ this.statusStrip1.SuspendLayout();
+ this.tabControl1.SuspendLayout();
+ this.tabPage1.SuspendLayout();
+ this.tabPage2.SuspendLayout();
+ this.SuspendLayout();
+ //
+ // groupBox1
+ //
+ this.groupBox1.Controls.Add(this.label5);
+ this.groupBox1.Controls.Add(this.Decrypt_btn);
+ this.groupBox1.Controls.Add(this.DeLoadImage_tbx);
+ this.groupBox1.Controls.Add(this.DeSaveFile_tbx);
+ this.groupBox1.Controls.Add(this.DeSaveFileBrowse_btn);
+ this.groupBox1.Controls.Add(this.label6);
+ this.groupBox1.Controls.Add(this.DeLoadImageBrowse_btn);
+ this.groupBox1.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F,
+System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.groupBox1.Location = new System.Drawing.Point(60, 0);
+ this.groupBox1.Name = "groupBox1";
+ this.groupBox1.Size = new System.Drawing.Size(320, 111);
+ this.groupBox1.TabIndex = 0;
+ this.groupBox1.TabStop = false;
+ //
+ // label5
+ //
+ this.label5.AutoSize = true;
+ this.label5.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Regular,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.label5.Location = new System.Drawing.Point(7, 22);
+ this.label5.Name = "label5";
+ this.label5.Size = new System.Drawing.Size(65, 14);
+ this.label5.TabIndex = 1;
+ this.label5.Text = "Load image:";
+ //
+ // Decrypt_btn
+ //
+ this.Decrypt_btn.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Bold,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.Decrypt_btn.Location = new System.Drawing.Point(123, 82);
+ this.Decrypt_btn.Name = "Decrypt_btn";
+ this.Decrypt_btn.Size = new System.Drawing.Size(75, 23);
+ this.Decrypt_btn.TabIndex = 3;
+ this.Decrypt_btn.Text = "Decrypt";
+ this.Decrypt_btn.UseVisualStyleBackColor = true;
+ this.Decrypt_btn.Click += new System.EventHandler(this.Decrypt_btn_Click);
+ //
+ // DeLoadImage_tbx
+ //
+ this.DeLoadImage_tbx.Anchor =
+((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Left)
+ | System.Windows.Forms.AnchorStyles.Right)));
+ this.DeLoadImage_tbx.Location = new System.Drawing.Point(78, 19);
+ this.DeLoadImage_tbx.Name = "DeLoadImage_tbx";
+ this.DeLoadImage_tbx.Size = new System.Drawing.Size(155, 20);
+ this.DeLoadImage_tbx.TabIndex = 0;
+ //
+ // DeSaveFile_tbx
+ //
+ this.DeSaveFile_tbx.Anchor =
+((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Left)
+ | System.Windows.Forms.AnchorStyles.Right)));
+ this.DeSaveFile_tbx.Location = new System.Drawing.Point(78, 54);
+ this.DeSaveFile_tbx.Name = "DeSaveFile_tbx";
+ this.DeSaveFile_tbx.Size = new System.Drawing.Size(155, 20);
+ this.DeSaveFile_tbx.TabIndex = 2;
+ //
+ // DeSaveFileBrowse_btn
+ //
+ this.DeSaveFileBrowse_btn.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.DeSaveFileBrowse_btn.Font = new System.Drawing.Font("Arial", 8.25F,
+System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.DeSaveFileBrowse_btn.Location = new System.Drawing.Point(239, 52);
+ this.DeSaveFileBrowse_btn.Name = "DeSaveFileBrowse_btn";
+ this.DeSaveFileBrowse_btn.Size = new System.Drawing.Size(75, 23);
+ this.DeSaveFileBrowse_btn.TabIndex = 3;
+ this.DeSaveFileBrowse_btn.Text = "Browse";
+ this.DeSaveFileBrowse_btn.UseVisualStyleBackColor = true;
+ this.DeSaveFileBrowse_btn.Click += new System.EventHandler(this.DeSaveFileBrowse_btn_Click);
+ //
+ // label6
+ //
+ this.label6.AutoSize = true;
+ this.label6.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Regular,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.label6.Location = new System.Drawing.Point(7, 57);
+ this.label6.Name = "label6";
+ this.label6.Size = new System.Drawing.Size(64, 14);
+ this.label6.TabIndex = 1;
+ this.label6.Text = "Save file to:";
+ //
+ // DeLoadImageBrowse_btn
+ //
+ this.DeLoadImageBrowse_btn.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.DeLoadImageBrowse_btn.Font = new System.Drawing.Font("Arial", 8.25F,
+System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.DeLoadImageBrowse_btn.Location = new System.Drawing.Point(239, 17);
+ this.DeLoadImageBrowse_btn.Name = "DeLoadImageBrowse_btn";
+ this.DeLoadImageBrowse_btn.Size = new System.Drawing.Size(75, 23);
+ this.DeLoadImageBrowse_btn.TabIndex = 1;
+ this.DeLoadImageBrowse_btn.Text = "Browse";
+ this.DeLoadImageBrowse_btn.UseVisualStyleBackColor = true;
+ this.DeLoadImageBrowse_btn.Click += new
+System.EventHandler(this.DeLoadImageBrowse_btn_Click);
+ //
+ // groupBox2
+ //
+ this.groupBox2.Controls.Add(this.Encrypt_btn);
+ this.groupBox2.Controls.Add(this.EnFileBrowse_btn);
+ this.groupBox2.Controls.Add(this.EnImageBrowse_btn);
+ this.groupBox2.Controls.Add(this.label2);
+ this.groupBox2.Controls.Add(this.EnFile_tbx);
+ this.groupBox2.Controls.Add(this.label1);
+ this.groupBox2.Controls.Add(this.EnImage_tbx);
+ this.groupBox2.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F,
+System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.groupBox2.Location = new System.Drawing.Point(60, 0);
+ this.groupBox2.Name = "groupBox2";
+ this.groupBox2.Size = new System.Drawing.Size(320, 111);
+ this.groupBox2.TabIndex = 0;
+ this.groupBox2.TabStop = false;
+ //
+ // Encrypt_btn
+ //
+ this.Encrypt_btn.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Bold,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.Encrypt_btn.Location = new System.Drawing.Point(123, 83);
+ this.Encrypt_btn.Name = "Encrypt_btn";
+ this.Encrypt_btn.Size = new System.Drawing.Size(75, 23);
+ this.Encrypt_btn.TabIndex = 3;
+ this.Encrypt_btn.Text = "Encrypt";
+ this.Encrypt_btn.UseVisualStyleBackColor = true;
+ this.Encrypt_btn.Click += new System.EventHandler(this.Encrypt_btn_Click);
+ //
+ // EnFileBrowse_btn
+ //
+ this.EnFileBrowse_btn.Font = new System.Drawing.Font("Arial", 8.25F,
+System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.EnFileBrowse_btn.Location = new System.Drawing.Point(239, 52);
+ this.EnFileBrowse_btn.Name = "EnFileBrowse_btn";
+ this.EnFileBrowse_btn.Size = new System.Drawing.Size(75, 23);
+ this.EnFileBrowse_btn.TabIndex = 3;
+ this.EnFileBrowse_btn.Text = "Browse";
+ this.EnFileBrowse_btn.UseVisualStyleBackColor = true;
+ this.EnFileBrowse_btn.Click += new System.EventHandler(this.EnFileBrowse_btn_Click);
+ //
+ // EnImageBrowse_btn
+ //
+ this.EnImageBrowse_btn.Font = new System.Drawing.Font("Arial", 8.25F,
+System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.EnImageBrowse_btn.Location = new System.Drawing.Point(239, 17);
+ this.EnImageBrowse_btn.Name = "EnImageBrowse_btn";
+ this.EnImageBrowse_btn.Size = new System.Drawing.Size(75, 23);
+ this.EnImageBrowse_btn.TabIndex = 1;
+ this.EnImageBrowse_btn.Text = "Browse";
+ this.EnImageBrowse_btn.UseVisualStyleBackColor = true;
+ this.EnImageBrowse_btn.Click += new System.EventHandler(this.EnImageBrowse_btn_Click);
+ //
+ // label2
+ //
+ this.label2.AutoSize = true;
+ this.label2.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Regular,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.label2.Location = new System.Drawing.Point(6, 57);
+ this.label2.Name = "label2";
+ this.label2.Size = new System.Drawing.Size(51, 14);
+ this.label2.TabIndex = 1;
+ this.label2.Text = "Load file:";
+ //
+ // EnFile_tbx
+ //
+ this.EnFile_tbx.Location = new System.Drawing.Point(77, 54);
+ this.EnFile_tbx.Name = "EnFile_tbx";
+ this.EnFile_tbx.Size = new System.Drawing.Size(156, 20);
+ this.EnFile_tbx.TabIndex = 2;
+ //
+ // label1
+ //
+ this.label1.AutoSize = true;
+ this.label1.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Regular,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.label1.Location = new System.Drawing.Point(6, 22);
+ this.label1.Name = "label1";
+ this.label1.Size = new System.Drawing.Size(65, 14);
+ this.label1.TabIndex = 1;
+ this.label1.Text = "Load image:";
+ //
+ // EnImage_tbx
+ //
+ this.EnImage_tbx.Location = new System.Drawing.Point(77, 20);
+ this.EnImage_tbx.Name = "EnImage_tbx";
+ this.EnImage_tbx.Size = new System.Drawing.Size(156, 20);
+ this.EnImage_tbx.TabIndex = 0;
+ //
+ // openFileDialog1
+ //
+ this.openFileDialog1.Filter = "Bitmap Files (*.bmp)|*.bmp|All files(*.*)|*.*";
+ //
+ // openFileDialog2
+ //
+ this.openFileDialog2.Filter = "All files (*.*)|*.*";
+ //
+ // saveFileDialog1
+ //
+ this.saveFileDialog1.Filter = "Bitmap Files (*.bmp)|*.bmp";
+ //
+ // openFileDialog3
+ //
+ this.openFileDialog3.Filter = "Bitmap Files (*.bmp)|*.bmp";
+ //
+ // label3
+ //
+ this.label3.AutoSize = true;
+ this.label3.Font = new System.Drawing.Font("Arial", 8.25F,
+((System.Drawing.FontStyle)((System.Drawing.FontStyle.Bold | System.Drawing.FontStyle.Underline))),
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.label3.ForeColor = System.Drawing.Color.Black;
+ this.label3.Location = new System.Drawing.Point(8, 145);
+ this.label3.Name = "label3";
+ this.label3.Size = new System.Drawing.Size(92, 14);
+ this.label3.TabIndex = 1;
+ this.label3.Text = "Image preview:";
+ //
+ // groupBox3
+ //
+ this.groupBox3.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(233)))),
+((int)(((byte)(240)))), ((int)(((byte)(221)))));
+ this.groupBox3.Controls.Add(this.ByteCapacity_lbl);
+ this.groupBox3.Controls.Add(this.CanSave_lbl);
+ this.groupBox3.Controls.Add(this.ImageWidth_lbl);
+ this.groupBox3.Controls.Add(this.ImageHeight_lbl);
+ this.groupBox3.Controls.Add(this.ImageSize_lbl);
+ this.groupBox3.Controls.Add(this.label9);
+ this.groupBox3.Controls.Add(this.label10);
+ this.groupBox3.Controls.Add(this.label8);
+ this.groupBox3.Controls.Add(this.label7);
+ this.groupBox3.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+ this.groupBox3.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Bold,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.groupBox3.ForeColor = System.Drawing.Color.Black;
+ this.groupBox3.Location = new System.Drawing.Point(461, 22);
+ this.groupBox3.Name = "groupBox3";
+ this.groupBox3.Size = new System.Drawing.Size(144, 122);
+ this.groupBox3.TabIndex = 2;
+ this.groupBox3.TabStop = false;
+ this.groupBox3.Text = "Image information";
+ //
+ // ByteCapacity_lbl
+ //
+ this.ByteCapacity_lbl.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.ByteCapacity_lbl.AutoSize = true;
+ this.ByteCapacity_lbl.Location = new System.Drawing.Point(88, 47);
+ this.ByteCapacity_lbl.Name = "ByteCapacity_lbl";
+ this.ByteCapacity_lbl.Size = new System.Drawing.Size(0, 14);
+ this.ByteCapacity_lbl.TabIndex = 2;
+ //
+ // CanSave_lbl
+ //
+ this.CanSave_lbl.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.CanSave_lbl.AutoSize = true;
+ this.CanSave_lbl.Location = new System.Drawing.Point(77, 97);
+ this.CanSave_lbl.Name = "CanSave_lbl";
+ this.CanSave_lbl.Size = new System.Drawing.Size(35, 14);
+ this.CanSave_lbl.TabIndex = 1;
+ this.CanSave_lbl.Text = "none";
+ //
+ // ImageWidth_lbl
+ // 
+ this.ImageWidth_lbl.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.ImageWidth_lbl.AutoSize = true;
+ this.ImageWidth_lbl.Location = new System.Drawing.Point(77, 72);
+ this.ImageWidth_lbl.Name = "ImageWidth_lbl";
+ this.ImageWidth_lbl.Size = new System.Drawing.Size(35, 14);
+ this.ImageWidth_lbl.TabIndex = 1;
+ this.ImageWidth_lbl.Text = "none";
+ //
+ // ImageHeight_lbl
+ //
+ this.ImageHeight_lbl.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.ImageHeight_lbl.AutoSize = true;
+ this.ImageHeight_lbl.Location = new System.Drawing.Point(77, 47);
+ this.ImageHeight_lbl.Name = "ImageHeight_lbl";
+ this.ImageHeight_lbl.Size = new System.Drawing.Size(35, 14);
+ this.ImageHeight_lbl.TabIndex = 1;
+ this.ImageHeight_lbl.Text = "none";
+ //
+ // ImageSize_lbl
+ //
+ this.ImageSize_lbl.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.ImageSize_lbl.AutoSize = true;
+ this.ImageSize_lbl.Location = new System.Drawing.Point(77, 22);
+ this.ImageSize_lbl.Name = "ImageSize_lbl";
+ this.ImageSize_lbl.Size = new System.Drawing.Size(35, 14);
+ this.ImageSize_lbl.TabIndex = 1;
+ this.ImageSize_lbl.Text = "none";
+ //
+ // label9
+ //
+ this.label9.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.label9.AutoSize = true;
+ this.label9.Location = new System.Drawing.Point(13, 97);
+ this.label9.Name = "label9";
+ this.label9.Size = new System.Drawing.Size(63, 14);
+ this.label9.TabIndex = 0;
+ this.label9.Text = "Can save: ";
+ //
+ // label10
+ //
+ this.label10.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.label10.AutoSize = true;
+ this.label10.Location = new System.Drawing.Point(13, 72);
+ this.label10.Name = "label10";
+ this.label10.Size = new System.Drawing.Size(44, 14);
+ this.label10.TabIndex = 0;
+ this.label10.Text = "Width: ";
+ //
+ // label8
+ // 
+ this.label8.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.label8.AutoSize = true;
+ this.label8.Location = new System.Drawing.Point(13, 47);
+ this.label8.Name = "label8";
+ this.label8.Size = new System.Drawing.Size(48, 14);
+ this.label8.TabIndex = 0;
+ this.label8.Text = "Height: ";
+ //
+ // label7
+ //
+ this.label7.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.label7.AutoSize = true;
+ this.label7.Location = new System.Drawing.Point(13, 22);
+ this.label7.Name = "label7";
+ this.label7.Size = new System.Drawing.Size(36, 14);
+ this.label7.TabIndex = 0;
+ this.label7.Text = "Size: ";
+ //
+ // Close_btn
+ //
+ this.Close_btn.Anchor =
+((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom |
+System.Windows.Forms.AnchorStyles.Right)));
+ this.Close_btn.DialogResult = System.Windows.Forms.DialogResult.Cancel;
+ this.Close_btn.Location = new System.Drawing.Point(527, 604);
+ this.Close_btn.Name = "Close_btn";
+ this.Close_btn.Size = new System.Drawing.Size(75, 23);
+ this.Close_btn.TabIndex = 3;
+ this.Close_btn.Text = "Close";
+ this.Close_btn.UseVisualStyleBackColor = true;
+ this.Close_btn.Visible = false;
+ this.Close_btn.Click += new System.EventHandler(this.Close_btn_Click);
+ //
+ // statusStrip1
+ //
+ this.statusStrip1.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(221)))),
+((int)(((byte)(240)))), ((int)(((byte)(192)))));
+ this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+ this.toolStripStatusLabel1});
+ this.statusStrip1.Location = new System.Drawing.Point(0, 630);
+ this.statusStrip1.Name = "statusStrip1";
+ this.statusStrip1.Size = new System.Drawing.Size(614, 22);
+ this.statusStrip1.SizingGrip = false;
+ this.statusStrip1.TabIndex = 4;
+ this.statusStrip1.Text = "statusStrip1";
+ //
+ // toolStripStatusLabel1
+ //
+ this.toolStripStatusLabel1.Name = "toolStripStatusLabel1";
+ this.toolStripStatusLabel1.Size = new System.Drawing.Size(38, 17);
+ this.toolStripStatusLabel1.Text = "Ready";
+ //
+ // tabControl1
+ //
+ this.tabControl1.Controls.Add(this.tabPage1);
+ this.tabControl1.Controls.Add(this.tabPage2);
+ this.tabControl1.Font = new System.Drawing.Font("Arial", 8.25F, System.Drawing.FontStyle.Bold,
+System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+ this.tabControl1.ImeMode = System.Windows.Forms.ImeMode.NoControl;
+ this.tabControl1.Location = new System.Drawing.Point(5, 0);
+ this.tabControl1.Multiline = true;
+ this.tabControl1.Name = "tabControl1";
+ this.tabControl1.SelectedIndex = 0;
+ this.tabControl1.Size = new System.Drawing.Size(449, 145);
+ this.tabControl1.TabIndex = 5;
+ //
+ // tabPage1
+ //
+ this.tabPage1.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(233)))),
+((int)(((byte)(240)))), ((int)(((byte)(221)))));
+ this.tabPage1.Controls.Add(this.groupBox2);
+ this.tabPage1.Location = new System.Drawing.Point(4, 23);
+ this.tabPage1.Name = "tabPage1";
+ this.tabPage1.Padding = new System.Windows.Forms.Padding(3);
+ this.tabPage1.Size = new System.Drawing.Size(441, 118);
+ this.tabPage1.TabIndex = 0;
+ this.tabPage1.Text = "Encrypt Image";
+ //
+ // tabPage2
+ //
+ this.tabPage2.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(233)))),
+((int)(((byte)(240)))), ((int)(((byte)(221)))));
+ this.tabPage2.Controls.Add(this.groupBox1);
+ this.tabPage2.Location = new System.Drawing.Point(4, 23);
+ this.tabPage2.Name = "tabPage2";
+ this.tabPage2.Padding = new System.Windows.Forms.Padding(3);
+ this.tabPage2.Size = new System.Drawing.Size(441, 118);
+ this.tabPage2.TabIndex = 1;
+ this.tabPage2.Text = "Decrypt Image";
+ //
+
+ //
+ // FrmSteganography
+ //
+ this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+ this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+ this.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(210)))), ((int)(((byte)(218)))),
+((int)(((byte)(196)))));
+ this.CancelButton = this.Close_btn;
+ this.ClientSize = new System.Drawing.Size(614, 652);
+ this.Controls.Add(this.linkLabel1);
+ this.Controls.Add(this.tabControl1);
+ this.Controls.Add(this.statusStrip1);
+ this.Controls.Add(this.Close_btn);
+ this.Controls.Add(this.groupBox3);
+ this.Controls.Add(this.label3);
+ this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
+ this.MaximizeBox = false;
+ this.Name = "FrmSteganography";
+ this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+ this.Text = "Steganography : Any File Hide in Image by p2p";
+ this.Paint += new System.Windows.Forms.PaintEventHandler(this.Form1_Paint);
+ this.groupBox1.ResumeLayout(false);
+ this.groupBox1.PerformLayout();
+ this.groupBox2.ResumeLayout(false);
+ this.groupBox2.PerformLayout();
+ this.groupBox3.ResumeLayout(false);
+ this.groupBox3.PerformLayout();
+ this.statusStrip1.ResumeLayout(false);
+ this.statusStrip1.PerformLayout();
+ this.tabControl1.ResumeLayout(false);
+ this.tabPage1.ResumeLayout(false);
+ this.tabPage2.ResumeLayout(false);
+ this.ResumeLayout(false);
+ this.PerformLayout();
+ }
+ #endregion
+ private System.Windows.Forms.GroupBox groupBox1;
+ private System.Windows.Forms.GroupBox groupBox2;
+ private System.Windows.Forms.Button EnImageBrowse_btn;
+ private System.Windows.Forms.Label label1;
+ private System.Windows.Forms.TextBox EnImage_tbx;
+ private System.Windows.Forms.Button EnFileBrowse_btn;
+ private System.Windows.Forms.Label label2;
+ private System.Windows.Forms.TextBox EnFile_tbx;
+ private System.Windows.Forms.Button Encrypt_btn;
+ private System.Windows.Forms.OpenFileDialog openFileDialog1;
+ private System.Windows.Forms.OpenFileDialog openFileDialog2;
+ private System.Windows.Forms.SaveFileDialog saveFileDialog1;
+ private System.Windows.Forms.Label label5;
+ private System.Windows.Forms.Button Decrypt_btn;
+ private System.Windows.Forms.TextBox DeLoadImage_tbx;
+ private System.Windows.Forms.TextBox DeSaveFile_tbx;
+ private System.Windows.Forms.Button DeSaveFileBrowse_btn;
+ private System.Windows.Forms.Label label6;
+ private System.Windows.Forms.Button DeLoadImageBrowse_btn;
+ private System.Windows.Forms.OpenFileDialog openFileDialog3;
+ private System.Windows.Forms.Label label3;
+ private System.Windows.Forms.GroupBox groupBox3;
+ private System.Windows.Forms.Label label7;
+ private System.Windows.Forms.Label label9;
+ private System.Windows.Forms.Label ByteCapacity_lbl;
+ private System.Windows.Forms.Label ImageSize_lbl;
+ private System.Windows.Forms.FolderBrowserDialog folderBrowserDialog1;
+ private System.Windows.Forms.Label CanSave_lbl;
+ private System.Windows.Forms.Label ImageWidth_lbl;
+ private System.Windows.Forms.Label ImageHeight_lbl;
+ private System.Windows.Forms.Label label10;
+ private System.Windows.Forms.Label label8;
+ private System.Windows.Forms.Button Close_btn;
+ private System.Windows.Forms.StatusStrip statusStrip1;
+ private System.Windows.Forms.ToolStripStatusLabel toolStripStatusLabel1;
+ private System.Windows.Forms.TabControl tabControl1;
+ private System.Windows.Forms.TabPage tabPage1;
+ private System.Windows.Forms.TabPage tabPage2;
+ private System.Windows.Forms.LinkLabel linkLabel1;
+ }
+}
